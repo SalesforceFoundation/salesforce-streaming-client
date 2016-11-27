@@ -13,11 +13,6 @@ $ py.test --cov=src/salesforce_streaming_client/ --cov-report html:coverage
 
 View test coverage results at ``./coverage``.
 
-Note that the tests will complain if you haven't set up a self-signed cert for the web application oauth2 flow.
-It will ask you to do this:
-
-``python -c 'from salesforce_requests_oauthlib import SalesforceOAuth2Session; SalesforceOAuth2Session.generate_local_webserver_key()'``
-
 Credits
 -------
 

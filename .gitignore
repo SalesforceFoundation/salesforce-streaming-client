@@ -10,6 +10,7 @@ tmp
 build
 dist
 
+.swp
 .*.swp
 .coverage
 coverage
