@@ -1,6 +1,13 @@
 News
 ====
 
+0.1.1
+---
+
+*Release date: 2016-11-28*
+
+* Fix dependencies.
+
 0.1
 ---
 
