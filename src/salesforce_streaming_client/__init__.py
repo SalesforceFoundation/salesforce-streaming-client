@@ -80,7 +80,7 @@ def _decode_set(initial_result):
 
 def iso_to_datetime(iso_string):
     return datetime.strptime(
-        iso_string.rsplit('.', 1)[0],
+        iso_string.rsplit('.', 1)[0].rsplit('Z', 1)[0],
         '%Y-%m-%dT%H:%M:%S'
     )
 
@@ -230,14 +230,21 @@ class SalesforceStreamingClient(BayeuxClient):
     def generic_callback(self, connect_response_element):
         channel = connect_response_element['channel']
         event_data = connect_response_element['data']['event']
+        payload = connect_response_element['data']['payload']
         this_replay_id = event_data['replayId']
 
         if channel not in self.replay_data:
             self.replay_data[channel] = {}
 
         if this_replay_id not in self.replay_data[channel]:
+            # Push topics have a createdDate under event, but platform events
+            # have a CreatedDate in the payload.  Instead of bringing type
+            # through to the callback, we just find one.
+            created_date = event_data['createdDate'] \
+                    if 'createdDate' in event_data \
+                    else payload['CreatedDate']
             self.replay_data[channel][this_replay_id] = {
-                'created_date': event_data['createdDate'],
+                'created_date': created_date,
                 'callbacks': set([])
             }
 
@@ -263,6 +270,8 @@ class SalesforceStreamingClient(BayeuxClient):
             type = 'generic'
         elif channel.startswith('/topic/'):
             type = 'push_topic'
+        elif channel.startswith('/event/'):
+            type = 'event'
         else:
             raise BadSubscriptionException(
                 '{0} is not a valid subscription channel.'.format(
