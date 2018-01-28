@@ -88,7 +88,7 @@ class ClientOne(SalesforceStreamingClient):
 
 
 def test_one_client(caplog, get_oauth_info):
-    caplog.setLevel(logging.INFO)
+    caplog.set_level(logging.INFO)
 
     random_value = ''.join(random.choice(ascii_letters) for i in range(12))
 
@@ -239,7 +239,7 @@ class ClientForTwo(ClientIgnoreSelf):
 
 
 def test_two_clients(caplog, get_oauth_info):
-    caplog.setLevel(logging.INFO)
+    caplog.set_level(logging.INFO)
 
     random_value = ''.join(random.choice(ascii_letters) for i in range(12))
 
@@ -372,7 +372,7 @@ class ClientForReplay(ClientIgnoreSelf):
 
 
 def test_publish_no_subscribe(caplog, get_oauth_info):
-    caplog.setLevel(logging.INFO)
+    caplog.set_level(logging.INFO)
 
     random_streaming_channel_name = '/u/{0}'.format(
         ''.join(random.choice(ascii_letters) for i in range(10))
@@ -401,7 +401,7 @@ def test_publish_no_subscribe(caplog, get_oauth_info):
 
 
 def test_replay_new_client(caplog, get_oauth_info):
-    caplog.setLevel(logging.INFO)
+    caplog.set_level(logging.INFO)
 
     random_streaming_channel_name = '/u/{0}'.format(
         ''.join(random.choice(ascii_letters) for i in range(10))
@@ -458,7 +458,7 @@ def test_replay_new_client(caplog, get_oauth_info):
 
 
 def test_replay_do_not_repeat_handler(caplog, get_oauth_info):
-    caplog.setLevel(logging.INFO)
+    caplog.set_level(logging.INFO)
 
     random_streaming_channel_name = '/u/{0}'.format(
         ''.join(random.choice(ascii_letters) for i in range(10))
@@ -551,7 +551,7 @@ def test_replay_do_not_repeat_handler(caplog, get_oauth_info):
 
 
 def test_replay_new_client_specific_replay_id(caplog, get_oauth_info):
-    caplog.setLevel(logging.INFO)
+    caplog.set_level(logging.INFO)
 
     random_streaming_channel_name = '/u/{0}'.format(
         ''.join(random.choice(ascii_letters) for i in range(10))
@@ -655,7 +655,7 @@ def test_replay_new_client_specific_replay_id(caplog, get_oauth_info):
 
 
 def test_replay_new_client_default_replay(caplog, get_oauth_info):
-    caplog.setLevel(logging.INFO)
+    caplog.set_level(logging.INFO)
 
     random_streaming_channel_name = '/u/{0}'.format(
         ''.join(random.choice(ascii_letters) for i in range(10))
