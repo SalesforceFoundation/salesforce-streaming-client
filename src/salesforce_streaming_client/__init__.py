@@ -31,7 +31,6 @@
 import os
 import simplejson as json
 import gevent.queue
-import urllib
 import errno
 from glob import glob
 from random import choice
@@ -41,6 +40,8 @@ from datetime import timedelta
 
 from salesforce_requests_oauthlib import SalesforceOAuth2Session
 from python_bayeux import BayeuxClient
+
+from six.moves.urllib.parse import urlencode
 
 import logging
 LOG = logging.getLogger('salesforce_streaming_client')
@@ -110,7 +111,7 @@ class SalesforceStreamingClient(BayeuxClient):
 
         if replay_client_id is None:
             replay_client_id = \
-                ''.join(choice(ascii_lowercase) for i in xrange(12))
+                ''.join(choice(ascii_lowercase) for i in range(12))
 
         self.replay_data_filename = os.path.join(
             self.settings_path,
@@ -259,8 +260,8 @@ class SalesforceStreamingClient(BayeuxClient):
 
         # Clean up old replay events for this channel
         day_ago = datetime.utcnow() - timedelta(1)  # Now minus one day
-        # More python3 compatible and allows us to del inside loop
-        for replay_id, data in list(self.replay_data[channel].iteritems()):
+        # Allows us to del inside loop
+        for replay_id, data in list(self.replay_data[channel].items()):
             if iso_to_datetime(data['created_date']) < day_ago:
                 del self.replay_data[channel][replay_id]
 
@@ -442,7 +443,7 @@ class SalesforceStreamingClient(BayeuxClient):
     def _query_for_streaming_channel(self, channel):
         query_response = self.oauth_session.get(
             '/services/data/vXX.X/query/?{query}'.format(
-                query=urllib.urlencode({
+                query=urlencode({
                     'q': 'SELECT Id, Name '
                          'FROM StreamingChannel '
                          'WHERE Name = \'{0}\''.format(
@@ -480,12 +481,12 @@ class SalesforceStreamingClient(BayeuxClient):
             )
 
         day_ago = datetime.utcnow() - timedelta(1)  # Now minus one day
-        for channel, replays in self.replay_data.iteritems():
+        for channel, replays in self.replay_data.items():
             self.replay_data[channel] = {
                 replay_id:
                     data
                     for replay_id, data
-                    in replays.iteritems()
+                    in replays.items()
                     if iso_to_datetime(data['created_date']) >= day_ago
             }
         try:

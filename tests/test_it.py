@@ -36,12 +36,12 @@ from salesforce_streaming_client import _encode_set
 import simplejson as json
 import random
 from string import ascii_letters
-import urllib
 from salesforce_requests_oauthlib import SalesforceOAuth2Session
 import gevent
 import logging
 from random import choice
 from string import ascii_lowercase
+from six.moves.urllib.parse import urlencode
 
 
 @fixture(scope='module')
@@ -127,7 +127,7 @@ def test_one_client(caplog, get_oauth_info):
     # Make sure we cleaned up the hanging streaming channel
     query_response = oauth_session.get(
         '/services/data/vXX.X/query/?{query}'.format(
-            query=urllib.urlencode({
+            query=urlencode({
                 'q': 'SELECT Id, Name '
                      'FROM StreamingChannel '
                      'WHERE Name = \'{0}\''.format(
@@ -472,7 +472,7 @@ def test_replay_do_not_repeat_handler(caplog, get_oauth_info):
 
     first_replay_id = None
 
-    replay_client_id = ''.join(choice(ascii_lowercase) for i in xrange(12))
+    replay_client_id = ''.join(choice(ascii_lowercase) for i in range(12))
 
     with ClientForReplay(oauth_client_id, client_secret,
                          username, sandbox=sandbox,
@@ -566,7 +566,7 @@ def test_replay_new_client_specific_replay_id(caplog, get_oauth_info):
     first_replay_id = None
     second_replay_id = None
 
-    replay_client_id = ''.join(choice(ascii_lowercase) for i in xrange(12))
+    replay_client_id = ''.join(choice(ascii_lowercase) for i in range(12))
 
     with ClientForReplay(oauth_client_id, client_secret,
                          username, sandbox=sandbox,
@@ -649,8 +649,9 @@ def test_replay_new_client_specific_replay_id(caplog, get_oauth_info):
         streaming_client2.shutdown()
 
         assert streaming_client2.counts_received == 1
-        new_replay_data_keys = \
+        new_replay_data_keys = list(
             streaming_client2.replay_data[random_streaming_channel_name].keys()
+        )
         assert new_replay_data_keys == [second_replay_id]
 
 
@@ -667,7 +668,7 @@ def test_replay_new_client_default_replay(caplog, get_oauth_info):
     username2 = get_oauth_info[3]
     sandbox = get_oauth_info[4]
 
-    replay_client_id = ''.join(choice(ascii_lowercase) for i in xrange(12))
+    replay_client_id = ''.join(choice(ascii_lowercase) for i in range(12))
 
     with ClientForReplay(oauth_client_id, client_secret,
                          username, sandbox=sandbox,
