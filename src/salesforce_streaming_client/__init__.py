@@ -231,7 +231,6 @@ class SalesforceStreamingClient(BayeuxClient):
     def generic_callback(self, connect_response_element):
         channel = connect_response_element['channel']
         event_data = connect_response_element['data']['event']
-        payload = connect_response_element['data']['payload']
         this_replay_id = event_data['replayId']
 
         if channel not in self.replay_data:
@@ -241,9 +240,12 @@ class SalesforceStreamingClient(BayeuxClient):
             # Push topics have a createdDate under event, but platform events
             # have a CreatedDate in the payload.  Instead of bringing type
             # through to the callback, we just find one.
-            created_date = event_data['createdDate'] \
-                    if 'createdDate' in event_data \
-                    else payload['CreatedDate']
+            created_date = None
+            if 'createdDate' in event_data:
+                created_date = event_data['createdDate']
+            else:
+                payload = connect_response_element['data']['payload']
+                created_date = payload['CreatedDate']
             self.replay_data[channel][this_replay_id] = {
                 'created_date': created_date,
                 'callbacks': set([])
