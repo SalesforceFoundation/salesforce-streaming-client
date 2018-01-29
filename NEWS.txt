@@ -1,6 +1,13 @@
 News
 ====
 
+0.1.3
+---
+
+*Release date: 2018-01-29*
+
+* Platform event support, python3 support, updated py.test set_level() usage.
+
 0.1.1
 ---
 
