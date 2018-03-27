@@ -94,6 +94,7 @@ class SalesforceStreamingClient(BayeuxClient):
                  password=None,
                  ignore_cached_refresh_tokens=False,
                  version=None,
+                 oauth2client=None,
                  replay_client_id=None,
                  cleanup_datadir=True):
 
@@ -141,7 +142,8 @@ class SalesforceStreamingClient(BayeuxClient):
             local_server_settings=local_server_settings,
             password=password,
             ignore_cached_refresh_tokens=ignore_cached_refresh_tokens,
-            version=version
+            version=version,
+            oauth2client=oauth2client
         )
 
         super(SalesforceStreamingClient, self).__init__(
