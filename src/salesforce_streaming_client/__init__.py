@@ -37,6 +37,7 @@ from random import choice
 from string import ascii_lowercase
 from datetime import datetime
 from datetime import timedelta
+from copy import deepcopy
 
 from salesforce_requests_oauthlib import SalesforceOAuth2Session
 from python_bayeux import BayeuxClient
@@ -309,6 +310,18 @@ class SalesforceStreamingClient(BayeuxClient):
             )
 
         self.streaming_callbacks[channel].append(callback)
+
+    # Fully overridden
+    def _resubscribe(self):
+        current_callbacks = deepcopy(self.streaming_callbacks)
+
+        # Clear out BayeuxClient's subscriptions so we can resubscribe
+        self.subscription_callbacks.clear()
+
+        self.streaming_callbacks.clear()
+        for channel, callbacks in current_callbacks.items():
+            for callback in callbacks:
+                self.subscribe(channel, callback)
 
     # Fully overridden
     def _subscribe_greenlet(self):
