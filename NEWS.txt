@@ -1,6 +1,13 @@
 News
 ====
 
+0.1.4
+---
+
+*Release date: 2018-08-29*
+
+* If connect tells us to handshake again, resubscribe after handshake
+
 0.1.3
 ---
 
