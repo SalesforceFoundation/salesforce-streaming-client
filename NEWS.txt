@@ -1,6 +1,13 @@
 News
 ====
 
+0.1.5
+---
+
+*Release date: 2018-09-03*
+
+* Callbacks now wait for resubscribe to finish
+
 0.1.4
 ---
 
