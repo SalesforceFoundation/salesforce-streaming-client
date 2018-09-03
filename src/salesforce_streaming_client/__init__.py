@@ -313,6 +313,8 @@ class SalesforceStreamingClient(BayeuxClient):
 
     # Fully overridden
     def _resubscribe(self):
+        self.waiting_for_resubscribe = True
+
         current_callbacks = deepcopy(self.streaming_callbacks)
 
         # Clear out BayeuxClient's subscriptions so we can resubscribe
@@ -322,6 +324,8 @@ class SalesforceStreamingClient(BayeuxClient):
         for channel, callbacks in current_callbacks.items():
             for callback in callbacks:
                 self.subscribe(channel, callback)
+
+        self.waiting_for_resubscribe = False
 
     # Fully overridden
     def _subscribe_greenlet(self):
