@@ -1,6 +1,13 @@
 News
 ====
 
+0.1.6
+---
+
+*Release date: 2018-09-17*
+
+* Modularized replay data storage; compatible with salesforce-requests-oauthlib 0.1.6
+
 0.1.5
 ---
 
