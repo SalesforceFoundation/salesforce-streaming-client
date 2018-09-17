@@ -28,12 +28,16 @@
     POSSIBILITY OF SUCH DAMAGE.
 '''
 
+from gevent import monkey
+monkey.patch_all()
+
 from getpass import getpass
 from pytest import fixture
 from salesforce_streaming_client import SalesforceStreamingClient
+from salesforce_streaming_client import PostgresStorage
+from salesforce_streaming_client import _encode_types
 from salesforce_streaming_client import _decode_set
-from salesforce_streaming_client import _encode_set
-import simplejson as json
+import json
 import random
 from string import ascii_letters
 from salesforce_requests_oauthlib import SalesforceOAuth2Session
@@ -145,8 +149,7 @@ def test_one_client(caplog, get_oauth_info):
 
 class ClientIgnoreSelf(SalesforceStreamingClient):
     def __init__(self, client_id, client_secret, username, random_value=None,
-                 sandbox=False, replay_client_id=None,
-                 really_ignore_self=True):
+                 really_ignore_self=True, **kwargs):
 
         self.random_value = random_value
         self.really_ignore_self = really_ignore_self
@@ -155,8 +158,7 @@ class ClientIgnoreSelf(SalesforceStreamingClient):
             client_id,
             client_secret,
             username,
-            sandbox=sandbox,
-            replay_client_id=replay_client_id
+            **kwargs
         )
 
     def publish(self, channel, message, keep_trying=True, autocreate=False):
@@ -287,8 +289,7 @@ def test_two_clients(caplog, get_oauth_info):
 
 class ClientForReplay(ClientIgnoreSelf):
     def __init__(self, client_id, client_secret, username, random_value=None,
-                 sandbox=False, replay_client_id=None,
-                 really_ignore_self=True):
+                 **kwargs):
         self.counts_received = 0
         self.counts_sent = 0
 
@@ -296,9 +297,7 @@ class ClientForReplay(ClientIgnoreSelf):
             client_id,
             client_secret,
             username,
-            sandbox=sandbox,
-            replay_client_id=replay_client_id,
-            really_ignore_self=really_ignore_self
+            **kwargs
         )
 
     def publish(self, channel, message, keep_trying=True, autocreate=False):
@@ -655,6 +654,129 @@ def test_replay_new_client_specific_replay_id(caplog, get_oauth_info):
         assert new_replay_data_keys == [second_replay_id]
 
 
+def test_replay_new_client_specific_replay_id_postgres(
+        caplog, get_oauth_info):
+
+    caplog.set_level(logging.INFO)
+
+    random_streaming_channel_name = '/u/{0}'.format(
+        ''.join(random.choice(ascii_letters) for i in range(10))
+    )
+
+    oauth_client_id = get_oauth_info[0]
+    client_secret = get_oauth_info[1]
+    username = get_oauth_info[2]
+    username2 = get_oauth_info[3]
+    sandbox = get_oauth_info[4]
+
+    first_replay_id = None
+    second_replay_id = None
+
+    replay_client_id = ''.join(choice(ascii_lowercase) for i in range(12))
+
+    postgres_uri = getpass(
+        'Paste in a Postgres URI for testing:'
+    )
+
+    storage = PostgresStorage(
+        replay_client_id,
+        postgres_uri
+    )
+
+    with ClientForReplay(oauth_client_id, client_secret,
+                         username, sandbox=sandbox,
+                         replay_client_id=replay_client_id,
+                         really_ignore_self=False,
+                         replay_data_storage=storage) as streaming_client1:
+
+        streaming_client1.create_streaming_channel(
+            random_streaming_channel_name,
+            delete_on_exit=False
+        )
+
+        streaming_client1.start()
+        streaming_client1.go()
+
+        streaming_client1.publish(
+            random_streaming_channel_name,
+            'COUNT1'
+        )
+
+        streaming_client1.publish(
+            random_streaming_channel_name,
+            'COUNT2'
+        )
+
+        streaming_client1.subscribe(
+            random_streaming_channel_name,
+            'handler',
+            replay='all'
+        )
+
+        channel_not_in_replay_data = \
+            random_streaming_channel_name not in streaming_client1.replay_data
+        while \
+            channel_not_in_replay_data or \
+            len(streaming_client1.replay_data[random_streaming_channel_name]) \
+                < 2:
+
+            gevent.sleep(0.05)
+
+            channel_not_in_replay_data = \
+                random_streaming_channel_name not in \
+                streaming_client1.replay_data
+
+        replay_ids = sorted(
+            streaming_client1.replay_data[random_streaming_channel_name].keys()
+        )
+        first_replay_id = replay_ids[0]
+        second_replay_id = replay_ids[1]
+
+        streaming_client1.shutdown()
+
+    storage2 = PostgresStorage(
+        replay_client_id,
+        postgres_uri
+    )
+
+    with ClientForReplay(oauth_client_id, client_secret, username2,
+                         replay_client_id=replay_client_id,
+                         sandbox=sandbox,
+                         replay_data_storage=storage2) as streaming_client2:
+
+        # This is kind of contrived, but we want to tell streaming_client2
+        # to handle COUNT2 again
+        del streaming_client2.replay_data[random_streaming_channel_name]
+
+        # So the client will clean up the channel when it exits
+        streaming_client2.created_streaming_channels.add(
+            random_streaming_channel_name
+        )
+
+        # We only want the second COUNT from client 1
+        streaming_client2.subscribe(
+            random_streaming_channel_name,
+            'handler',
+            replay=first_replay_id
+        )
+        streaming_client2.start()
+        streaming_client2.go()
+
+        try:
+            while streaming_client2.counts_received == 0:
+                gevent.sleep(0.05)
+        except:
+            assert False
+
+        streaming_client2.shutdown()
+
+        assert streaming_client2.counts_received == 1
+        new_replay_data_keys = list(
+            streaming_client2.replay_data[random_streaming_channel_name].keys()
+        )
+        assert new_replay_data_keys == [second_replay_id]
+
+
 def test_replay_new_client_default_replay(caplog, get_oauth_info):
     caplog.set_level(logging.INFO)
 
@@ -716,13 +838,22 @@ def test_replay_new_client_default_replay(caplog, get_oauth_info):
 
     # Edit the saved replay_data file to remove the highest replay id
     replay_data = {}
-    with open(streaming_client1.replay_data_filename, 'r') as fileh:
+    with open(
+        streaming_client1.replay_data_storage.full_settings_path,
+        'r'
+    ) as fileh:
         replay_data = json.load(fileh, object_hook=_decode_set)
+
     highest_replay_id = \
         sorted(list(replay_data[random_streaming_channel_name].keys()))[-1]
+
     del replay_data[random_streaming_channel_name][highest_replay_id]
-    with open(streaming_client1.replay_data_filename, 'w') as fileh:
-        json.dump(replay_data, fileh, default=_encode_set)
+
+    with open(
+        streaming_client1.replay_data_storage.full_settings_path,
+        'w'
+    ) as fileh:
+        json.dump(replay_data, fileh, default=_encode_types)
 
     with ClientForReplay(oauth_client_id, client_secret, username2,
                          replay_client_id=replay_client_id,
@@ -743,7 +874,7 @@ def test_replay_new_client_default_replay(caplog, get_oauth_info):
 
         try:
             while streaming_client2.counts_received == 0:
-                gevent.sleep(0.05)
+                gevent.sleep(0.2)
         except:
             assert False
 
