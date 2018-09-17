@@ -14,7 +14,8 @@ install_requires = [
     # http://packages.python.org/distribute/setuptools.html#declaring-dependencies
     'salesforce-requests-oauthlib',
     'python-bayeux',
-    'six'
+    'six',
+    'pytz'
 ]
 
 

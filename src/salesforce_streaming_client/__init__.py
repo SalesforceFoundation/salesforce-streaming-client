@@ -29,7 +29,7 @@
 '''
 
 import os
-import simplejson as json
+import json
 import gevent.queue
 import errno
 from glob import glob
@@ -38,11 +38,21 @@ from string import ascii_lowercase
 from datetime import datetime
 from datetime import timedelta
 from copy import deepcopy
+from abc import ABCMeta
+from abc import abstractmethod
+import six
+from six.moves.urllib.parse import urlencode
+import pytz
+import psycopg2
+from psycopg2.extras import execute_values
+from psycopg2.extras import Json
+from psycopg2.extensions import AsIs
 
 from salesforce_requests_oauthlib import SalesforceOAuth2Session
+from salesforce_requests_oauthlib import HiddenLocalStorage as OauthlibHiddenLocalStorage
+from salesforce_requests_oauthlib import PostgresStorage as OauthlibPostgresStorage
 from python_bayeux import BayeuxClient
 
-from six.moves.urllib.parse import urlencode
 
 import logging
 LOG = logging.getLogger('salesforce_streaming_client')
@@ -57,9 +67,11 @@ default_replay_data_filename = 'replay_data.json'
 streaming_endpoint = '/cometd/{0}/'
 
 
-def _encode_set(v):
+def _encode_types(v):
     if isinstance(v, set):
         return list(v)
+    elif isinstance(v, datetime):
+        return v.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
     return v
 
 
@@ -80,56 +92,299 @@ def _decode_set(initial_result):
     return to_return
 
 
-def iso_to_datetime(iso_string):
-    return datetime.strptime(
-        iso_string.rsplit('.', 1)[0].rsplit('Z', 1)[0],
-        '%Y-%m-%dT%H:%M:%S'
-    )
+def string_to_datetime(date_string):
+    if six.PY2:
+        return datetime.strptime(
+            date_string,
+            '%Y-%m-%dT%H:%M:%S.%fZ'
+        ).replace(tzinfo=pytz.utc)
+    elif six.PY3:
+        return datetime.strptime(
+            date_string,
+            '%Y-%m-%dT%H:%M:%S.%f%z'
+        )
 
 
-class SalesforceStreamingClient(BayeuxClient):
-    def __init__(self, oauth_client_id, client_secret, username,
-                 settings_path=None,
-                 sandbox=False,
-                 local_server_settings=('localhost', 60443),
-                 password=None,
-                 ignore_cached_refresh_tokens=False,
-                 version=None,
-                 replay_client_id=None,
-                 cleanup_datadir=True):
+@six.add_metaclass(ABCMeta)
+class ReplayDataStorageMechanism:
+    @abstractmethod
+    def store(self, tokens):
+        pass
 
-        self.cleanup_datadir = cleanup_datadir
+    @abstractmethod
+    def retrieve(self):
+        pass
 
-        self.settings_path = \
-            default_settings_path if settings_path is None else settings_path
+    @abstractmethod
+    def clean(self, replay_data, lower_boundary):
+        pass
 
-        if not os.path.exists(self.settings_path):
+
+class HiddenLocalStorage(ReplayDataStorageMechanism):
+    def __init__(self, replay_client_id, settings_path=default_settings_path):
+        if not os.path.exists(settings_path):
             try:
-                os.makedirs(self.settings_path)
+                os.makedirs(settings_path)
             except OSError as e:  # Guard against race condition
                 if e.errno != errno.EEXIST:
                     raise e
 
-        if replay_client_id is None:
-            replay_client_id = \
-                ''.join(choice(ascii_lowercase) for i in range(12))
-
-        self.replay_data_filename = os.path.join(
-            self.settings_path,
+        self.full_settings_path = os.path.join(
+            settings_path,
             '{0}_{1}'.format(
                 replay_client_id,
                 default_replay_data_filename
             )
         )
 
+        self.oauth_token_storage = OauthlibHiddenLocalStorage()
+
+    def store(self, replay_data):
+        # Yes, overwrite
+        with open(self.full_settings_path, 'w') as fileh:
+            json.dump(replay_data, fileh, default=_encode_types)
+
+    def retrieve(self):
+        replay_data = {}
+        try:
+            with open(self.full_settings_path, 'r') as fileh:
+                replay_data = json.load(fileh, object_hook=_decode_set)
+        except IOError:
+            return replay_data
+        else:
+            for channel, replay_id_data in replay_data.items():
+                for replay_id, data in replay_id_data.items():
+                    data['created_date'] = \
+                            string_to_datetime(data['created_date'])
+
+        return replay_data
+
+    def clean(self, replay_data, lower_boundary):
+        # Clean up any old replay files we can find that have all old events
+        # This could collide with reading/writing by other instances of this
+        # client.
+        files_to_delete = []
+
+        for filename in glob(os.path.join(
+            os.path.dirname(self.full_settings_path),
+            '*_{0}'.format(default_replay_data_filename)
+        )):
+            try:
+                with open(filename, 'r') as fileh:
+                    file_contents = fileh.read()
+            except IOError:
+                pass
+
+            if len(file_contents) == 0:
+                files_to_delete.append(filename)
+                continue
+
+            file_replays = json.loads(
+                file_contents,
+                object_hook=_decode_set
+            )
+            delete_file = True
+            for file_replay in file_replays.values():
+                for data in file_replay.values():
+                    if string_to_datetime(
+                        data['created_date']
+                    ) >= lower_boundary:
+                        delete_file = False
+                        break
+
+                if not delete_file:
+                    break
+            if delete_file:
+                files_to_delete.append(filename)
+
+        for filename in files_to_delete:
+            os.remove(filename)
+
+
+class PostgresStorage(ReplayDataStorageMechanism):
+    def __init__(
+        self,
+        replay_client_id,
+        database_uri=None,
+        schema_name='salesforce_streaming_client'
+    ):
+        self.replay_client_id = replay_client_id
+
+        self.oauth_token_storage = OauthlibPostgresStorage(
+            database_uri
+        )
+
+        if database_uri is None:
+            database_uri = os.environ['DATABASE_URL']
+
+        self.table_name = 'replay_data'
+        self.schema_name = schema_name
+
+        with psycopg2.connect(database_uri, sslmode='require') as pg_conn:
+            pg_cursor = pg_conn.cursor()
+            pg_cursor.execute(
+                'SELECT COUNT(*) FROM information_schema.schemata '
+                'WHERE schema_name = %s',
+                (self.schema_name,)
+            )
+            schema_count = pg_cursor.fetchone()[0]
+
+            if schema_count == 0:
+                pg_cursor.execute(
+                    'CREATE SCHEMA %s',
+                    (AsIs(self.schema_name),)
+                )
+                pg_conn.commit()
+
+            pg_cursor.execute(
+                'SET search_path TO %s',
+                (AsIs(self.schema_name),)
+            )
+
+            pg_cursor.execute(
+                'SELECT COUNT(*) '
+                'FROM information_schema.tables '
+                'WHERE table_schema = %s '
+                'AND table_name = %s '
+                'AND table_type = %s',
+                (self.schema_name, self.table_name, 'BASE TABLE')
+            )
+            table_count = pg_cursor.fetchone()[0]
+            if table_count == 0:
+                create_table_template = '''CREATE TABLE %s (
+    replay_client_id text not null,
+    channel text not null,
+    replay_id integer not null,
+    created_date timestamp with time zone not null,
+    callbacks jsonb,
+    primary key (replay_client_id, channel, replay_id)
+)'''
+                pg_cursor.execute(
+                    create_table_template,
+                    (AsIs(self.table_name),)
+                )
+
+        self.database_uri = database_uri
+
+    def store(self, replay_data):
+        with psycopg2.connect(self.database_uri, sslmode='require') as pg_conn:
+            pg_cursor = pg_conn.cursor()
+            pg_cursor.execute(
+                'SET search_path TO %s',
+                (AsIs(self.schema_name),)
+            )
+            insert_stmt = '{0} %s ON CONFLICT ' \
+                          '(replay_client_id, channel, replay_id) DO UPDATE '\
+                          'SET created_date = EXCLUDED.created_date, ' \
+                          'callbacks = EXCLUDED.callbacks'
+            insert_stmt = insert_stmt.format(
+                pg_cursor.mogrify(
+                    'INSERT INTO %s (replay_client_id, channel, replay_id, ' \
+                    'created_date, callbacks) VALUES',
+                    (AsIs(self.table_name),)
+                ).decode()
+            )
+
+            values = []
+            for channel, replay_id_data in replay_data.items():
+                for replay_id, replay_data in replay_id_data.items():
+                    values.append((
+                        self.replay_client_id,
+                        channel,
+                        replay_id,
+                        replay_data['created_date'],
+                        Json(_encode_types(replay_data['callbacks']))
+                    ))
+
+            execute_values(
+                pg_cursor,
+                insert_stmt,
+                values
+            )
+
+    def retrieve(self):
+        to_return = {}
+
+        # We'll reconnect every time, because it might be a long time between
+        # DB access
+        with psycopg2.connect(self.database_uri, sslmode='require') as pg_conn:
+            pg_cursor = pg_conn.cursor()
+            pg_cursor.execute(
+                'SET search_path TO %s',
+                (AsIs(self.schema_name),)
+            )
+            pg_cursor.execute(
+                'SELECT channel, replay_id, created_date, ' \
+                'callbacks FROM %s WHERE replay_client_id = %s',
+                (AsIs(self.table_name), self.replay_client_id)
+            )
+
+            for result in pg_cursor.fetchall():
+                if result[0] not in to_return:
+                    to_return[result[0]] = {}
+                channel_data = to_return[result[0]]
+
+                channel_data[result[1]] = {
+                    'created_date': result[2],
+                    'callbacks': result[3]
+                }
+
+        return to_return
+
+    def clean(self, replay_data, lower_boundary):
+        # Clean up any rows with old created dates
+        with psycopg2.connect(self.database_uri, sslmode='require') as pg_conn:
+            pg_cursor = pg_conn.cursor()
+            pg_cursor.execute(
+                'SET search_path TO %s',
+                (AsIs(self.schema_name),)
+            )
+
+            delete_template = 'DELETE FROM %s ' \
+                'WHERE created_date < %s'
+            pg_cursor.execute(
+                delete_template,
+                (AsIs(self.table_name), lower_boundary)
+            )
+
+
+class SalesforceStreamingClient(BayeuxClient):
+    def __init__(self, oauth_client_id, client_secret, username,
+                 sandbox=False,
+                 local_server_settings=None,
+                 callback_settings=None,
+                 password=None,
+                 ignore_cached_refresh_tokens=False,
+                 version=None,
+                 replay_client_id=None,
+                 clean_replay_data=True,
+                 replay_data_storage=None):
+
+        self.clean_replay_data = clean_replay_data
+
+        # for backward compatibility
+        self.callback_settings = callback_settings
+        if self.callback_settings is None:
+            if local_server_settings is None:
+                self.callback_settings = ('localhost', 60443)
+            else:
+                self.callback_settings = local_server_settings
+
+        if replay_client_id is None:
+            replay_client_id = \
+                ''.join(choice(ascii_lowercase) for i in range(12))
+
+        if replay_data_storage is None:
+            replay_data_storage = HiddenLocalStorage(replay_client_id)
+
+        if isinstance(replay_data_storage, ReplayDataStorageMechanism):
+            self.replay_data_storage = replay_data_storage
+        else:
+            self.replay_data_storage = replay_data_storage(replay_client_id)
+
         self.streaming_callbacks = {}
 
-        self.replay_data = {}
-        try:
-            with open(self.replay_data_filename) as fileh:
-                self.replay_data = json.load(fileh, object_hook=_decode_set)
-        except IOError:
-            pass
+        self.replay_data = self.replay_data_storage.retrieve()
 
         self.created_streaming_channels = set([])
 
@@ -137,13 +392,15 @@ class SalesforceStreamingClient(BayeuxClient):
             oauth_client_id,
             client_secret,
             username,
-            settings_path=settings_path,
             sandbox=sandbox,
-            local_server_settings=local_server_settings,
+            callback_settings=callback_settings,
             password=password,
             ignore_cached_refresh_tokens=ignore_cached_refresh_tokens,
-            version=version
+            version=version,
+            token_storage=self.replay_data_storage.oauth_token_storage
         )
+        if version is None:
+            oauth_session.use_latest_version()
 
         super(SalesforceStreamingClient, self).__init__(
             streaming_endpoint.format(oauth_session.version),
@@ -247,8 +504,9 @@ class SalesforceStreamingClient(BayeuxClient):
             else:
                 payload = connect_response_element['data']['payload']
                 created_date = payload['CreatedDate']
+
             self.replay_data[channel][this_replay_id] = {
-                'created_date': created_date,
+                'created_date': string_to_datetime(created_date),
                 'callbacks': set([])
             }
 
@@ -262,10 +520,10 @@ class SalesforceStreamingClient(BayeuxClient):
                 )
 
         # Clean up old replay events for this channel
-        day_ago = datetime.utcnow() - timedelta(1)  # Now minus one day
+        day_ago = datetime.now(tz=pytz.utc) - timedelta(1)  # Now minus one day
         # Allows us to del inside loop
         for replay_id, data in list(self.replay_data[channel].items()):
-            if iso_to_datetime(data['created_date']) < day_ago:
+            if data['created_date'] < day_ago:
                 del self.replay_data[channel][replay_id]
 
     def subscribe(self, channel, callback, replay=True, autocreate=True):
@@ -394,6 +652,16 @@ class SalesforceStreamingClient(BayeuxClient):
                         # a handshake
                         self.subscription_queue.put(subscription_queue_message)
 
+                    elif subscribe_response['error'] == \
+                            '403::Organization total events daily limit exceeded':
+
+                        raise BadSubscriptionException(
+                            'Could not subscribe to {0} because "{1}"'
+                            .format(
+                                channel,
+                                subscribe_response['error']
+                            )
+                        )
                     else:
                         # Yes, this does mean that failures may not look quite
                         # right if the response contains more than one element.
@@ -499,52 +767,20 @@ class SalesforceStreamingClient(BayeuxClient):
                 )
             )
 
-        day_ago = datetime.utcnow() - timedelta(1)  # Now minus one day
+        day_ago = datetime.now(tz=pytz.utc) - timedelta(1)  # Now minus one day
         for channel, replays in self.replay_data.items():
             self.replay_data[channel] = {
                 replay_id:
                     data
                     for replay_id, data
                     in replays.items()
-                    if iso_to_datetime(data['created_date']) >= day_ago
+                    if data['created_date'] >= day_ago
             }
-        try:
-            with open(self.replay_data_filename, 'w') as fileh:
-                json.dump(self.replay_data, fileh, default=_encode_set)
-        except IOError:
-            pass
 
-        # Clean up any old replay files we can find that have all old events
-        # This could collide with reading/writing by other instances of this
-        # client.
-        if self.cleanup_datadir:
-            for filename in glob(os.path.join(
-                self.settings_path,
-                '*{0}'.format(default_replay_data_filename)
-            )):
-                files_to_delete = []
-                try:
-                    with open(filename, 'r') as fileh:
-                        file_replays = json.load(
-                            fileh,
-                            object_hook=_decode_set
-                        )
-                        delete_file = True
-                        for file_replay in file_replays.values():
-                            for data in file_replay.values():
-                                if iso_to_datetime(data['created_date']) >= \
-                                        day_ago:
+        self.replay_data_storage.store(self.replay_data)
 
-                                    delete_file = False
-                                    break
-                            if not delete_file:
-                                break
-                        if delete_file:
-                            files_to_delete.append(filename)
-                except IOError:
-                    pass
-                for filename in files_to_delete:
-                    os.remove(filename)
+        if self.clean_replay_data:
+            self.replay_data_storage.clean(self.replay_data, day_ago)
 
 
 class BadSubscriptionException(Exception):
