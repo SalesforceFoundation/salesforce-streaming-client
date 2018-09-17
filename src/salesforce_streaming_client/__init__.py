@@ -326,7 +326,6 @@ class PostgresStorage(ReplayDataStorageMechanism):
 
                 channel_data[result[1]] = {
                     'created_date': result[2],
-                    #'callbacks': json.loads(result[3])
                     'callbacks': result[3]
                 }
 
