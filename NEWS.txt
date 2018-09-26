@@ -1,6 +1,13 @@
 News
 ====
 
+0.1.7
+---
+
+*Release date: 2018-09-26*
+
+* %z for "Z" in datetimes is python 3.7 only; restore python 3.6 support
+
 0.1.6
 ---
 
