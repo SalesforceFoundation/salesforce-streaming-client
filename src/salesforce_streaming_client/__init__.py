@@ -93,16 +93,10 @@ def _decode_set(initial_result):
 
 
 def string_to_datetime(date_string):
-    if six.PY2:
-        return datetime.strptime(
-            date_string,
-            '%Y-%m-%dT%H:%M:%S.%fZ'
-        ).replace(tzinfo=pytz.utc)
-    elif six.PY3:
-        return datetime.strptime(
-            date_string,
-            '%Y-%m-%dT%H:%M:%S.%f%z'
-        )
+    return datetime.strptime(
+        date_string,
+        '%Y-%m-%dT%H:%M:%S.%fZ'
+    ).replace(tzinfo=pytz.utc)
 
 
 @six.add_metaclass(ABCMeta)
