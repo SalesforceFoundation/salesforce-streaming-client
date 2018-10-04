@@ -37,12 +37,15 @@ from salesforce_streaming_client import SalesforceStreamingClient
 from salesforce_streaming_client import PostgresStorage
 from salesforce_streaming_client import _encode_types
 from salesforce_streaming_client import _decode_set
+from types import MethodType
 import json
 import random
 from string import ascii_letters
 from salesforce_requests_oauthlib import SalesforceOAuth2Session
+from python_bayeux import RepeatedTimeoutException
 import gevent
 import logging
+import requests
 from random import choice
 from string import ascii_lowercase
 from six.moves.urllib.parse import urlencode
@@ -147,6 +150,112 @@ def test_one_client(caplog, get_oauth_info):
         query_response_payload['totalSize'] == 0
 
 
+def test_one_client_subscribe_timeouts(caplog, get_oauth_info):
+    caplog.set_level(logging.INFO)
+
+    random_value = ''.join(random.choice(ascii_letters) for i in range(12))
+
+    random_streaming_channel_name = '/u/{0}'.format(
+        ''.join(random.choice(ascii_letters) for i in range(10))
+    )
+
+    oauth_client_id = get_oauth_info[0]
+    client_secret = get_oauth_info[1]
+    username = get_oauth_info[2]
+    sandbox = get_oauth_info[4]
+
+    def patched_send_message(self, payload, **kwargs):
+        if 'channel' in payload and payload['channel'] == '/meta/subscribe':
+            raise requests.exceptions.ReadTimeout()
+        else:
+            return self._real_send_message(payload, **kwargs)
+
+    with ClientOne(oauth_client_id, client_secret, username,
+                   sandbox=sandbox) as streaming_client:
+        streaming_client._real_send_message = streaming_client._send_message
+        streaming_client._send_message = MethodType(
+            patched_send_message,
+            streaming_client
+        )
+
+        streaming_client.subscribe(
+            random_streaming_channel_name,
+            'shutdown_myself'
+        )
+        streaming_client.start()
+        streaming_client.publish(
+            random_streaming_channel_name,
+            random_value,
+            keep_trying=True
+        )
+
+        try:
+            streaming_client.block()
+        except KeyboardInterrupt:
+            assert False
+
+        # This depends on the order that outbound_greenlets is populated
+        assert isinstance(
+            streaming_client.outbound_greenlets[0].exception,
+            RepeatedTimeoutException
+        )
+        assert not hasattr(streaming_client, 'result')
+
+
+def test_one_client_subscribe_timeouts_recover(caplog, get_oauth_info):
+    caplog.set_level(logging.INFO)
+
+    random_value = ''.join(random.choice(ascii_letters) for i in range(12))
+
+    random_streaming_channel_name = '/u/{0}'.format(
+        ''.join(random.choice(ascii_letters) for i in range(10))
+    )
+
+    oauth_client_id = get_oauth_info[0]
+    client_secret = get_oauth_info[1]
+    username = get_oauth_info[2]
+    sandbox = get_oauth_info[4]
+
+    def patched_send_message(self, payload, **kwargs):
+        if 'channel' in payload and payload['channel'] == '/meta/subscribe':
+            self.test_num_timeouts = 0  \
+                if not hasattr(self, 'test_num_timeouts') \
+                else self.test_num_timeouts + 1
+
+            if self.test_num_timeouts > 5:
+                return self._real_send_message(payload, **kwargs)
+
+            raise requests.exceptions.ReadTimeout()
+        else:
+            return self._real_send_message(payload, **kwargs)
+
+    with ClientOne(oauth_client_id, client_secret, username,
+                   sandbox=sandbox) as streaming_client:
+        streaming_client._real_send_message = streaming_client._send_message
+        streaming_client._send_message = MethodType(
+            patched_send_message,
+            streaming_client
+        )
+
+        streaming_client.subscribe(
+            random_streaming_channel_name,
+            'shutdown_myself'
+        )
+        streaming_client.start()
+        streaming_client.publish(
+            random_streaming_channel_name,
+            random_value,
+            keep_trying=True
+        )
+
+        try:
+            streaming_client.block()
+        except KeyboardInterrupt:
+            assert False
+
+        assert streaming_client.result == random_value
+
+
 class ClientIgnoreSelf(SalesforceStreamingClient):
     def __init__(self, client_id, client_secret, username, random_value=None,
                  really_ignore_self=True, **kwargs):
@@ -176,7 +285,6 @@ class ClientIgnoreSelf(SalesforceStreamingClient):
         self.publish_channel = publish_channel
         self.publish_message = publish_message
         self.loop_greenlet = gevent.Greenlet(self._publish_loop)
-        self.greenlets.append(self.loop_greenlet)
         self.loop_greenlet.start()
 
     def _publish_loop(self):

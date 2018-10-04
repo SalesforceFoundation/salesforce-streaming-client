@@ -48,10 +48,12 @@ from psycopg2.extras import execute_values
 from psycopg2.extras import Json
 from psycopg2.extensions import AsIs
 
+import requests
 from salesforce_requests_oauthlib import SalesforceOAuth2Session
 from salesforce_requests_oauthlib import HiddenLocalStorage as OauthlibHiddenLocalStorage
 from salesforce_requests_oauthlib import PostgresStorage as OauthlibPostgresStorage
 from python_bayeux import BayeuxClient
+from python_bayeux import RepeatedTimeoutException
 
 
 import logging
@@ -580,12 +582,14 @@ class SalesforceStreamingClient(BayeuxClient):
         self.waiting_for_resubscribe = False
 
     # Fully overridden
-    def _subscribe_greenlet(self):
+    def _subscribe_greenlet(self, successive_timeout_threshold=20,
+                            timeout_wait=5):
         channel = None
         replay = None
         autocreate = None
         type = None
 
+        successive_timeouts = 0
         while True:
             subscription_queue_message = None
             LOG.info(
@@ -628,7 +632,22 @@ class SalesforceStreamingClient(BayeuxClient):
                 }
             }
 
-            subscribe_responses = self._send_message(subscribe_request_payload)
+            subscribe_responses = []
+            try:
+                subscribe_responses = self._send_message(
+                    subscribe_request_payload
+                )
+            except requests.exceptions.ReadTimeout:
+                successive_timeouts += 1
+
+                if successive_timeouts > successive_timeout_threshold:
+                    raise RepeatedTimeoutException('subscribe')
+
+                gevent.sleep(timeout_wait)
+                self.subscription_queue.put(subscription_queue_message)
+            else:
+                successive_timeouts = 0
+
             for subscribe_response in subscribe_responses:
                 if not subscribe_response['successful']:
                     error = subscribe_response['error']
