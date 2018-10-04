@@ -1,6 +1,13 @@
 News
 ====
 
+0.1.8
+---
+
+*Release date: 2018-10-03*
+
+* Improved error handling; compatible with python-bayeux 0.1.6
+
 0.1.7
 ---
 
