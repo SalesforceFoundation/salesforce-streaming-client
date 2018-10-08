@@ -33,6 +33,7 @@ monkey.patch_all()
 
 from getpass import getpass
 from pytest import fixture
+from pytest import raises
 from salesforce_streaming_client import SalesforceStreamingClient
 from salesforce_streaming_client import PostgresStorage
 from salesforce_streaming_client import _encode_types
@@ -189,16 +190,9 @@ def test_one_client_subscribe_timeouts(caplog, get_oauth_info):
             keep_trying=True
         )
 
-        try:
+        with raises(RepeatedTimeoutException) as exc_info:
             streaming_client.block()
-        except KeyboardInterrupt:
-            assert False
 
-        # This depends on the order that outbound_greenlets is populated
-        assert isinstance(
-            streaming_client.outbound_greenlets[0].exception,
-            RepeatedTimeoutException
-        )
         assert not hasattr(streaming_client, 'result')
 
 
