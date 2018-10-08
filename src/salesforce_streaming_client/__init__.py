@@ -445,8 +445,11 @@ class SalesforceStreamingClient(BayeuxClient):
                 if channel_id is None:
                     if publication['autocreate']:
                         self.create_streaming_channel(channel)
+
                     if publication['autocreate'] or publication['keep_trying']:
-                        self.publication_queue.put(publication)
+                        if not self.shutdown_called:
+                            self.publication_queue.put(publication)
+                            gevent.sleep(1)
                         continue
                     else:
                         raise ValueError(
