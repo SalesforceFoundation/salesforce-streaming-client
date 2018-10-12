@@ -354,7 +354,8 @@ class SalesforceStreamingClient(BayeuxClient):
                  version=None,
                  replay_client_id=None,
                  clean_replay_data=True,
-                 replay_data_storage=None):
+                 replay_data_storage=None,
+                 **kwargs):
 
         self.clean_replay_data = clean_replay_data
 
@@ -393,7 +394,8 @@ class SalesforceStreamingClient(BayeuxClient):
             password=password,
             ignore_cached_refresh_tokens=ignore_cached_refresh_tokens,
             version=version,
-            token_storage=self.replay_data_storage.oauth_token_storage
+            token_storage=self.replay_data_storage.oauth_token_storage,
+            **kwargs
         )
         if version is None:
             oauth_session.use_latest_version()
