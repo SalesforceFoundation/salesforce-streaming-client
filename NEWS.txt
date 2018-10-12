@@ -1,6 +1,13 @@
 News
 ====
 
+0.1.10
+---
+
+*Release date: 2018-10-12*
+
+* Pass constructor kwargs to SalesforceOAuth2Session constructor
+
 0.1.9
 ---
 
