@@ -665,7 +665,9 @@ class SalesforceStreamingClient(BayeuxClient):
                         # Toss it back into the queue
                         self.subscription_queue.put(subscription_queue_message)
 
-                    elif subscribe_response['error'] == '402::Unknown client':
+                    elif error == '402::Unknown client' or error == \
+                                  '403::Unknown client':
+
                         # Just try again, and eventually connect() will re-try
                         # a handshake
                         self.subscription_queue.put(subscription_queue_message)
