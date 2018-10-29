@@ -1,6 +1,13 @@
 News
 ====
 
+0.1.11
+---
+
+*Release date: 2018-10-29*
+
+* Handle both 402 and 403 unknown client messages
+
 0.1.10
 ---
 
