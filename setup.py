@@ -6,7 +6,7 @@ README = open(os.path.join(here, 'README.rst')).read()
 NEWS = open(os.path.join(here, 'NEWS.txt')).read()
 
 
-version = '0.1.11'
+version = '0.1.12'
 
 install_requires = [
     # List your project dependencies here.
@@ -30,7 +30,7 @@ setup(name='salesforce-streaming-client',
     author='Adam J. Lincoln',
     author_email='alincoln@salesforce.com',
     url='https://github.com/SalesforceFoundation/salesforce-streaming-client',
-    download_url='https://github.com/SalesforceFoundation/salesforce-streaming-client/tarball/0.1.11',
+    download_url='https://github.com/SalesforceFoundation/salesforce-streaming-client/tarball/0.1.12',
     license='BSD 3-Clause',
     packages=find_packages('src'),
     package_dir = {'': 'src'},include_package_data=True,

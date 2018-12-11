@@ -1,6 +1,13 @@
 News
 ====
 
+0.1.12
+---
+
+*Release date: 2018-12-11*
+
+* If subscription fails, tell us why
+
 0.1.11
 ---
 
