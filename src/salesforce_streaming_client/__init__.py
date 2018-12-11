@@ -686,9 +686,10 @@ class SalesforceStreamingClient(BayeuxClient):
                         # Yes, this does mean that failures may not look quite
                         # right if the response contains more than one element.
                         raise BadSubscriptionException(
-                            '{0} does not exist and was not autocreated.'
-                            .format(
-                                channel
+                            '{0} does not exist and was not autocreated. '
+                            'Error: {1}'.format(
+                                channel,
+                                error
                             )
                         )
 
