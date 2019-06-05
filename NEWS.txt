@@ -1,6 +1,13 @@
 News
 ====
 
+0.1.13
+---
+
+*Release date: 2019-06-05*
+
+* Allow change data capture channels
+
 0.1.12
 ---
 
