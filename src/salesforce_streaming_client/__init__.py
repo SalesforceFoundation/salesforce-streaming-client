@@ -535,6 +535,8 @@ class SalesforceStreamingClient(BayeuxClient):
             type = 'push_topic'
         elif channel.startswith('/event/'):
             type = 'event'
+        elif channel.startswith('/data/'):
+            type = 'change_data_capture'
         else:
             raise BadSubscriptionException(
                 '{0} is not a valid subscription channel.'.format(
