@@ -1,5 +1,5 @@
 salesforce-streaming-client
-==========================
+===========================
 
 A Salesforce streaming API client for python, built on salesforce-requests-oauthlib and python-bayeux.
 
