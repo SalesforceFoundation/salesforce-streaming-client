@@ -4,6 +4,14 @@ salesforce-streaming-client
 A Salesforce streaming API client for python, built on salesforce-requests-oauthlib and python-bayeux.
 
 
+Please note: as of the 1.0.0 release of python-bayeux (a dependency of salesforce-streaming-client), code using this
+library will need to call gevent's monkey patching mechanisms.  It may have previously been possible to rely on
+python-bayeux's internal call, but that is no longer supported.
+
+Also, as of the 1.0.0 release of python-bayeux, it no longer officially supports python 2.  It may be possible to continue
+using this library with python 2 but it is not supported.
+
+
 Tests
 -----
 
